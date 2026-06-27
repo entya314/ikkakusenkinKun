@@ -33,6 +33,17 @@ sql/002_insert_initial_settings.sql
 python main.py
 ```
 
+## GUIで実行
+
+以下で操作パネルを起動できる。
+
+```bash
+python gui.py
+```
+
+GUIでは、DB接続確認、Coincheck価格取得、Coincheck残高取得、APIテスト実行、1回だけ実行、定期実行の開始・停止ができる。
+実注文を許可する `TRADING_ENABLED=true` の場合は画面上に警告表示される。
+
 ## Coincheck実注文の有効化
 
 注文APIは `app/exchange/exchange_client.py` に実装済み。
