@@ -160,7 +160,7 @@ crypto_bot_detail_design/
 
 - ticker取得
 - 板情報取得
-- 約定履歴取得
+- ローソク足CSV取込によるバックテストデータ作成
 
 ### Private API
 

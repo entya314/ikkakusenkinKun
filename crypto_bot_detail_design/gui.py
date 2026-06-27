@@ -9,6 +9,7 @@ import threading
 import time
 from pathlib import Path
 from tkinter import BOTH, DISABLED, END, LEFT, NORMAL, RIGHT, TOP, Button, Frame, Label, StringVar, Tk
+from tkinter import filedialog
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
@@ -16,8 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent
 os.chdir(BASE_DIR)
 
 from app.backtest.backtest_service import BacktestService  # noqa: E402
-from app.backtest.historical_data_service import HistoricalDataService  # noqa: E402
-from app.backtest.historical_trade_store import HistoricalTradeStore  # noqa: E402
+from app.backtest.historical_candle_store import HistoricalCandleStore  # noqa: E402
 from app.database.db import fetch_one  # noqa: E402
 from app.exchange.exchange_client import CoincheckClient  # noqa: E402
 from app.strategy.strategies import list_strategies  # noqa: E402
@@ -48,6 +48,7 @@ class CryptoBotGui:
         self.status_var = StringVar()
         self.config_var = StringVar()
         self.strategy_var = StringVar(value=settings.strategy_name)
+        self.timeframe_var = StringVar(value="5m")
 
         self._build()
         self._refresh_config()
@@ -82,9 +83,9 @@ class CryptoBotGui:
         backtest_toolbar.pack(side=TOP, fill="x", pady=(0, 10))
 
         self._add_button(backtest_toolbar, "1回だけ実行", lambda: self._run_action("1回だけ実行", run_once))
-        self._add_button(backtest_toolbar, "履歴取得/保存", lambda: self._run_action("履歴取得/保存", self._fetch_and_save_history))
-        self._add_button(backtest_toolbar, "DB履歴件数", lambda: self._run_action("DB履歴件数", self._check_history_count))
-        self._add_button(backtest_toolbar, "DBバックテスト", lambda: self._run_action("DBバックテスト", self._run_db_backtest))
+        self._add_button(backtest_toolbar, "CSVローソク足取込", self._select_and_import_candles)
+        self._add_button(backtest_toolbar, "ローソク足件数", lambda: self._run_action("ローソク足件数", self._check_candle_count))
+        self._add_button(backtest_toolbar, "ローソク足BT", lambda: self._run_action("ローソク足BT", self._run_candle_backtest))
 
         loopbar = Frame(body)
         loopbar.pack(side=TOP, fill="x", pady=(0, 10))
@@ -98,6 +99,16 @@ class CryptoBotGui:
             state="readonly",
         )
         self.strategy_combo.pack(side=LEFT, padx=(0, 14))
+
+        Label(loopbar, text="足").pack(side=LEFT, padx=(0, 6))
+        self.timeframe_combo = ttk.Combobox(
+            loopbar,
+            textvariable=self.timeframe_var,
+            values=["5m", "15m", "1h", "1d"],
+            width=8,
+            state="readonly",
+        )
+        self.timeframe_combo.pack(side=LEFT, padx=(0, 14))
 
         self.start_button = Button(loopbar, text="定期実行開始", command=self._start_loop, width=18)
         self.start_button.pack(side=LEFT, padx=(0, 8))
@@ -128,9 +139,9 @@ class CryptoBotGui:
                     f"取引所: {settings.exchange_name}",
                     f"銘柄: {settings.symbol}",
                     f"戦略: {self.strategy_var.get()}",
+                    f"ローソク足: {self.timeframe_var.get()}",
                     f"注文金額: {settings.order_amount_jpy} JPY",
                     f"バックテスト: 初期資金 {settings.backtest_initial_jpy} JPY / 注文金額 {settings.backtest_order_amount_jpy} JPY",
-                    f"バックテスト取得: 直近 {settings.backtest_trade_limit}件",
                     f"Coincheck Access Key: {_mask(settings.coincheck_access_key)}",
                     f"Coincheck Secret Key: {_mask(settings.coincheck_secret_key)}",
                 ]
@@ -184,51 +195,50 @@ class CryptoBotGui:
         output = "\n".join(part for part in [completed.stdout, completed.stderr] if part.strip())
         return f"終了コード: {completed.returncode}\n{output}"
 
-    def _fetch_and_save_history(self) -> str:
-        client = CoincheckClient()
-        history = HistoricalDataService(client)
-        trades = history.fetch_recent_trades(
-            pair=settings.symbol.lower(),
-            pages=settings.backtest_trade_pages,
-            limit=settings.backtest_trade_limit,
+    def _select_and_import_candles(self) -> None:
+        path = filedialog.askopenfilename(
+            title="ローソク足CSVを選択",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
         )
-        if not trades:
-            return "保存対象の取引履歴が取得できませんでした。"
+        if not path:
+            return
+        self._run_action("CSVローソク足取込", lambda: self._import_candles(path))
 
-        store = HistoricalTradeStore()
-        inserted = store.save_trades(settings.symbol, trades)
-        total = store.count(settings.symbol)
-        started_at, ended_at = store.date_range(settings.symbol)
+    def _import_candles(self, path: str) -> str:
+        store = HistoricalCandleStore()
+        inserted = store.import_csv(path, settings.symbol, self.timeframe_var.get())
+        total = store.count(settings.symbol, self.timeframe_var.get())
+        started_at, ended_at = store.date_range(settings.symbol, self.timeframe_var.get())
         lines = [
-            f"API取得件数: {len(trades)}件",
             f"新規保存件数: {inserted}件",
-            f"DB累計件数: {total}件",
+            f"DB累計ローソク足: {total}件",
         ]
         if started_at and ended_at:
             lines.append(f"DB期間: {started_at:%Y-%m-%d %H:%M:%S} -> {ended_at:%Y-%m-%d %H:%M:%S}")
         return "\n".join(lines)
 
-    def _check_history_count(self) -> str:
-        store = HistoricalTradeStore()
-        total = store.count(settings.symbol)
-        started_at, ended_at = store.date_range(settings.symbol)
+    def _check_candle_count(self) -> str:
+        store = HistoricalCandleStore()
+        total = store.count(settings.symbol, self.timeframe_var.get())
+        started_at, ended_at = store.date_range(settings.symbol, self.timeframe_var.get())
         if not total:
-            return "DBにバックテスト用履歴データがありません。先に「履歴取得/保存」を実行してください。"
+            return "DBにバックテスト用ローソク足データがありません。先に「CSVローソク足取込」を実行してください。"
         return "\n".join(
             [
-                f"DB履歴件数: {total}件",
+                f"DBローソク足件数: {total}件",
                 f"DB期間: {started_at:%Y-%m-%d %H:%M:%S} -> {ended_at:%Y-%m-%d %H:%M:%S}",
             ]
         )
 
-    def _run_db_backtest(self) -> str:
-        store = HistoricalTradeStore()
-        trades = store.load_trades(settings.symbol)
-        if not trades:
-            return "DBにバックテスト用履歴データがありません。先に「履歴取得/保存」を実行してください。"
+    def _run_candle_backtest(self) -> str:
+        store = HistoricalCandleStore()
+        candles = store.load_candles(settings.symbol, self.timeframe_var.get())
+        if not candles:
+            return "DBにバックテスト用ローソク足データがありません。先に「CSVローソク足取込」を実行してください。"
 
         result = BacktestService().run(
-            trades=trades,
+            candles_5m=candles,
+            candles_15m=None,
             symbol=settings.symbol,
             strategy_name=self.strategy_var.get(),
             initial_jpy=settings.backtest_initial_jpy,
@@ -236,7 +246,8 @@ class CryptoBotGui:
         )
         lines = [
             f"戦略: {result.strategy_name}",
-            f"対象取引履歴: {len(trades)}件",
+            f"対象ローソク足: {len(candles)}件",
+            f"時間足: {self.timeframe_var.get()}",
             f"初期資金: {result.initial_jpy:.0f} JPY",
             f"最終資金: {result.final_jpy:.0f} JPY",
             f"総損益: {result.total_profit_jpy:.0f} JPY",

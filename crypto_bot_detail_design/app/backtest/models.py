@@ -6,15 +6,6 @@ from decimal import Decimal
 
 
 @dataclass(frozen=True)
-class HistoricalTrade:
-    id: int
-    price: Decimal
-    amount: Decimal
-    created_at: datetime
-    side: str | None = None
-
-
-@dataclass(frozen=True)
 class BacktestTrade:
     entry_time: datetime
     exit_time: datetime
@@ -42,4 +33,3 @@ class BacktestResult:
     max_drawdown_rate: Decimal
     max_consecutive_losses: int
     trades: list[BacktestTrade]
-

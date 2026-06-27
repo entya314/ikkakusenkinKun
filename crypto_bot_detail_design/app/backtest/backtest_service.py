@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from datetime import datetime, timedelta
 from decimal import Decimal
 
-from app.backtest.candle_builder import build_candles_from_trades
-from app.backtest.models import BacktestResult, BacktestTrade, HistoricalTrade
+from app.backtest.models import BacktestResult, BacktestTrade
 from app.market.candle_service import Candle
 from app.strategy.signal_service import SignalService
 from app.strategy.strategies import TradeAction, get_strategy
@@ -16,7 +17,8 @@ class BacktestService:
 
     def run(
         self,
-        trades: list[HistoricalTrade],
+        candles_5m: list[Candle],
+        candles_15m: list[Candle] | None,
         symbol: str,
         strategy_name: str,
         initial_jpy: int | Decimal | None = None,
@@ -30,8 +32,11 @@ class BacktestService:
         take_profit = take_profit_rate if take_profit_rate is not None else settings.take_profit_rate
         stop_loss = stop_loss_rate if stop_loss_rate is not None else settings.stop_loss_rate
 
-        candles_5m = build_candles_from_trades(trades, symbol, "5m")
-        candles_15m = build_candles_from_trades(trades, symbol, "15m")
+        candles_5m = sorted(candles_5m, key=lambda item: item.started_at)
+        if candles_15m is None:
+            candles_15m = build_higher_timeframe_candles(candles_5m, symbol, "15m")
+        else:
+            candles_15m = sorted(candles_15m, key=lambda item: item.started_at)
 
         cash = initial_cash
         position_amount = Decimal("0")
@@ -142,3 +147,47 @@ class BacktestService:
 
 def _closes(candles: list[Candle]) -> list[float]:
     return [float(candle.close_price) for candle in candles]
+
+
+def build_higher_timeframe_candles(
+    candles: list[Candle],
+    symbol: str,
+    timeframe: str,
+) -> list[Candle]:
+    minutes = _timeframe_to_minutes(timeframe)
+    buckets: dict[datetime, list[Candle]] = defaultdict(list)
+
+    for candle in sorted(candles, key=lambda item: item.started_at):
+        buckets[_floor_time(candle.started_at, minutes)].append(candle)
+
+    result: list[Candle] = []
+    for started_at in sorted(buckets):
+        items = buckets[started_at]
+        result.append(
+            Candle(
+                symbol=symbol,
+                timeframe=timeframe,
+                open_price=items[0].open_price,
+                high_price=max(item.high_price for item in items),
+                low_price=min(item.low_price for item in items),
+                close_price=items[-1].close_price,
+                volume=sum((item.volume or Decimal("0") for item in items), Decimal("0")),
+                started_at=started_at,
+                ended_at=started_at + timedelta(minutes=minutes),
+            )
+        )
+    return result
+
+
+def _timeframe_to_minutes(timeframe: str) -> int:
+    value = timeframe.strip().lower()
+    if value.endswith("m"):
+        return int(value[:-1])
+    if value.endswith("h"):
+        return int(value[:-1]) * 60
+    raise ValueError(f"未対応の時間足です: {timeframe}")
+
+
+def _floor_time(value: datetime, minutes: int) -> datetime:
+    minute = value.minute - (value.minute % minutes)
+    return value.replace(minute=minute, second=0, microsecond=0)

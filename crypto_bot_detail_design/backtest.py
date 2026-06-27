@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 from app.backtest.backtest_service import BacktestService
-from app.backtest.historical_trade_store import HistoricalTradeStore
+from app.backtest.historical_candle_store import HistoricalCandleStore
 from config import settings
 
 
 def main() -> None:
-    store = HistoricalTradeStore()
-    trades = store.load_trades(settings.symbol)
-    if not trades:
-        print("No historical trades in DB. Run fetch_historical_trades.py first.")
+    store = HistoricalCandleStore()
+    candles = store.load_candles(settings.symbol, "5m")
+    if not candles:
+        print("No historical candles in DB. Run import_historical_candles.py first.")
         return
 
     result = BacktestService().run(
-        trades=trades,
+        candles_5m=candles,
+        candles_15m=None,
         symbol=settings.symbol,
         strategy_name=settings.strategy_name,
         initial_jpy=settings.backtest_initial_jpy,
@@ -22,7 +23,7 @@ def main() -> None:
 
     print(f"strategy={result.strategy_name}")
     print(f"symbol={result.symbol}")
-    print(f"trades_source_count={len(trades)}")
+    print(f"candle_count={len(candles)}")
     print(f"initial_jpy={result.initial_jpy:.0f}")
     print(f"final_jpy={result.final_jpy:.0f}")
     print(f"total_profit_jpy={result.total_profit_jpy:.0f}")

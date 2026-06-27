@@ -48,18 +48,18 @@ python main.py
 python gui.py
 ```
 
-GUIでは、DB接続確認、Coincheck価格取得、Coincheck残高取得、APIテスト実行、履歴取得/保存、DBバックテスト、1回だけ実行、定期実行の開始・停止ができる。
+GUIでは、DB接続確認、Coincheck価格取得、Coincheck残高取得、APIテスト実行、CSVローソク足取込、ローソク足バックテスト、1回だけ実行、定期実行の開始・停止ができる。
 実注文を許可する `TRADING_ENABLED=true` の場合は画面上に警告表示される。
 
-バックテストでは、先にCoincheckの公開取引履歴をDBへ保存し、DB上の履歴データで仮想売買を行う。
+バックテストでは、CSVなどで用意したローソク足データをDBへ保存し、DB上のローソク足で仮想売買を行う。
 バックテスト処理は注文APIを呼ばない。
 
 GUIでの基本手順:
 
-1. `履歴取得/保存` でCoincheck公開取引履歴をDBへ保存する。
-2. `DB履歴件数` で保存件数と期間を確認する。
+1. `CSVローソク足取込` でOHLCV CSVをDBへ保存する。
+2. `ローソク足件数` で保存件数と期間を確認する。
 3. 戦略を選択する。
-4. `DBバックテスト` でDB上の履歴データを使って検証する。
+4. `ローソク足BT` でDB上のローソク足データを使って検証する。
 
 選択できる戦略:
 
@@ -72,18 +72,22 @@ GUIでの基本手順:
 コマンドでバックテストする場合:
 
 ```bash
-python fetch_historical_trades.py
+python import_historical_candles.py path\to\candles.csv --timeframe 5m
 python backtest.py
 ```
 
-APIからDBへ保存する取得件数は `.env` の `BACKTEST_TRADE_LIMIT` で調整する。
-Coincheckの現在の取引履歴APIではページング指定が使えないため、直近取得分で検証する。
+CSV形式は以下を想定する。
+
+```csv
+started_at,open,high,low,close,volume
+2026-06-01 00:00:00,15000000,15050000,14980000,15020000,12.34
+```
 
 初回のみ、SQL Serverにバックテスト用テーブルを追加するSQLも用意している。
-GUIまたは `fetch_historical_trades.py` 実行時にも自動作成される。
+GUIまたは `import_historical_candles.py` 実行時にも自動作成される。
 
 ```text
-sql/003_create_historical_trades.sql
+sql/004_create_historical_candles.sql
 ```
 
 ## Coincheck実注文の有効化

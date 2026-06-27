@@ -1,40 +1,45 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 
-from app.backtest.backtest_service import BacktestService
-from app.backtest.candle_builder import build_candles_from_trades
-from app.backtest.historical_data_service import HistoricalDataService
-from app.backtest.models import HistoricalTrade
+from app.backtest.backtest_service import BacktestService, build_higher_timeframe_candles
+from app.backtest.historical_candle_store import load_candles_from_csv
+from app.market.candle_service import Candle
 
 
-def _trend_trades(count: int = 360) -> list[HistoricalTrade]:
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    trades = []
+def _trend_candles(count: int = 360) -> list[Candle]:
+    start = datetime(2026, 1, 1)
+    candles = []
     for i in range(count):
-        trades.append(
-            HistoricalTrade(
-                id=i + 1,
-                price=Decimal("1000000") + Decimal(i * 500),
-                amount=Decimal("0.01"),
-                created_at=start + timedelta(minutes=i),
-                side="buy" if i % 2 == 0 else "sell",
+        price = Decimal("1000000") + Decimal(i * 500)
+        candles.append(
+            Candle(
+                symbol="BTC_JPY",
+                timeframe="5m",
+                open_price=price,
+                high_price=price + Decimal("100"),
+                low_price=price - Decimal("100"),
+                close_price=price,
+                volume=Decimal("0.1"),
+                started_at=start + timedelta(minutes=5 * i),
+                ended_at=start + timedelta(minutes=5 * (i + 1)),
             )
         )
-    return trades
+    return candles
 
 
-def test_build_candles_from_trades_groups_5m():
-    candles = build_candles_from_trades(_trend_trades(10), "BTC_JPY", "5m")
+def test_build_higher_timeframe_candles_groups_15m():
+    candles = build_higher_timeframe_candles(_trend_candles(6), "BTC_JPY", "15m")
 
     assert len(candles) == 2
     assert candles[0].open_price == Decimal("1000000")
-    assert candles[0].close_price == Decimal("1002000")
-    assert candles[0].volume == Decimal("0.05")
+    assert candles[0].close_price == Decimal("1001000")
+    assert candles[0].volume == Decimal("0.3")
 
 
 def test_backtest_runs_without_real_orders():
     result = BacktestService().run(
-        trades=_trend_trades(),
+        candles_5m=_trend_candles(),
+        candles_15m=None,
         symbol="BTC_JPY",
         strategy_name="sma_cross_only",
         initial_jpy=100000,
@@ -49,29 +54,17 @@ def test_backtest_runs_without_real_orders():
     assert result.final_jpy > Decimal("100000")
 
 
-def test_historical_data_service_fetches_recent_trades_without_paging_params():
-    class FakeClient:
-        def __init__(self):
-            self.calls = []
+def test_load_candles_from_csv(tmp_path):
+    csv_path = tmp_path / "candles.csv"
+    csv_path.write_text(
+        "started_at,open,high,low,close,volume\n"
+        "2026-01-01 00:00:00,100,110,90,105,1.5\n",
+        encoding="utf-8",
+    )
 
-        def get_trades(self, **kwargs):
-            self.calls.append(kwargs)
-            return {
-                "success": True,
-                "data": [
-                    {
-                        "id": 10,
-                        "rate": "1000000",
-                        "amount": "0.01",
-                        "order_type": "buy",
-                        "created_at": "2026-01-01T00:00:00Z",
-                    }
-                ],
-            }
+    candles = load_candles_from_csv(csv_path, "BTC_JPY", "5m")
 
-    client = FakeClient()
-    trades = HistoricalDataService(client).fetch_recent_trades("btc_jpy", pages=10, limit=50)
-
-    assert len(trades) == 1
-    assert trades[0].id == 10
-    assert client.calls == [{"pair": "btc_jpy", "limit": 50}]
+    assert len(candles) == 1
+    assert candles[0].open_price == Decimal("100")
+    assert candles[0].close_price == Decimal("105")
+    assert candles[0].volume == Decimal("1.5")
