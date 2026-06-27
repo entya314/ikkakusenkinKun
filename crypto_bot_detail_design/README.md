@@ -41,8 +41,27 @@ python main.py
 python gui.py
 ```
 
-GUIでは、DB接続確認、Coincheck価格取得、Coincheck残高取得、APIテスト実行、1回だけ実行、定期実行の開始・停止ができる。
+GUIでは、DB接続確認、Coincheck価格取得、Coincheck残高取得、APIテスト実行、バックテスト実行、1回だけ実行、定期実行の開始・停止ができる。
 実注文を許可する `TRADING_ENABLED=true` の場合は画面上に警告表示される。
+
+バックテストではCoincheckの公開取引履歴を取得し、選択した戦略で仮想売買を行う。
+バックテスト処理は注文APIを呼ばない。
+
+選択できる戦略:
+
+- `sma_rsi_trend`: 現在の標準戦略。5分足・15分足SMA上向き、かつ5分足RSI 70未満で買う。
+- `sma_cross_only`: RSI条件を外し、5分足・15分足SMA上向きだけで買う。
+- `rsi_oversold`: 5分足RSI 30以下で買う逆張り戦略。
+
+`.env` の `STRATEGY_NAME` でも標準戦略を切り替えられる。
+
+コマンドでバックテストする場合:
+
+```bash
+python backtest.py
+```
+
+バックテスト件数は `.env` の `BACKTEST_TRADE_LIMIT` と `BACKTEST_TRADE_PAGES` で調整する。
 
 ## Coincheck実注文の有効化
 

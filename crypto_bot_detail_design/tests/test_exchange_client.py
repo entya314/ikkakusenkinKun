@@ -47,6 +47,26 @@ def test_create_market_buy_order_posts_jpy_amount(monkeypatch):
     assert kwargs["data"] == "pair=btc_jpy&order_type=market_buy&market_buy_amount=10000"
 
 
+def test_get_trades_uses_public_endpoint(monkeypatch):
+    client = _client()
+    response = Mock(ok=True)
+    response.json.return_value = {"success": True, "data": []}
+    get = Mock(return_value=response)
+    monkeypatch.setattr("app.exchange.exchange_client.requests.get", get)
+
+    result = client.get_trades("btc_jpy", limit=50, ending_before=123)
+
+    assert result == {"success": True, "data": []}
+    get.assert_called_once()
+    _, kwargs = get.call_args
+    assert kwargs["params"] == {
+        "pair": "btc_jpy",
+        "limit": 50,
+        "order": "desc",
+        "ending_before": 123,
+    }
+
+
 def test_create_limit_sell_order_posts_rate_and_amount(monkeypatch):
     client = _client()
     response = Mock(ok=True)

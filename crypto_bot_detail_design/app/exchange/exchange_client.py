@@ -59,6 +59,26 @@ class CoincheckClient:
             raise ExchangeApiError(f"ticker取得失敗: {response.status_code} {response.text}")
         return response.json()
 
+    def get_trades(
+        self,
+        pair: str = "btc_jpy",
+        limit: int = 100,
+        order: str = "desc",
+        starting_after: int | None = None,
+        ending_before: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"pair": pair, "limit": limit, "order": order}
+        if starting_after is not None:
+            params["starting_after"] = starting_after
+        if ending_before is not None:
+            params["ending_before"] = ending_before
+
+        url = f"{self.base_url}/api/trades"
+        response = requests.get(url, params=params, timeout=10)
+        if not response.ok:
+            raise ExchangeApiError(f"取引履歴取得失敗: {response.status_code} {response.text}")
+        return response.json()
+
     def get_balance(self) -> dict[str, Any]:
         self._ensure_private_api_credentials()
 

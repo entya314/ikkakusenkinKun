@@ -66,6 +66,13 @@ class Settings:
     take_profit_rate: float = _get_float("TAKE_PROFIT_RATE", 0.005)
     stop_loss_rate: float = _get_float("STOP_LOSS_RATE", 0.007)
     main_loop_interval_seconds: int = _get_int("MAIN_LOOP_INTERVAL_SECONDS", 60)
+    strategy_name: str = os.getenv("STRATEGY_NAME", "sma_rsi_trend")
+
+    # Backtest settings
+    backtest_initial_jpy: int = _get_int("BACKTEST_INITIAL_JPY", 100000)
+    backtest_order_amount_jpy: int = _get_int("BACKTEST_ORDER_AMOUNT_JPY", 5000)
+    backtest_trade_pages: int = _get_int("BACKTEST_TRADE_PAGES", 5)
+    backtest_trade_limit: int = _get_int("BACKTEST_TRADE_LIMIT", 100)
 
     # Risk settings
     max_daily_loss_rate: float = _get_float("MAX_DAILY_LOSS_RATE", 0.03)
@@ -108,4 +115,3 @@ class Settings:
 
 
 settings = Settings()
-

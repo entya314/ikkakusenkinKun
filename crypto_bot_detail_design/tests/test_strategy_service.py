@@ -14,3 +14,12 @@ def test_should_hold_when_has_open_position():
     ind = IndicatorResult(sma_short=110, sma_long=100, rsi=55, macd=1, macd_signal=1)
     decision = service.should_buy(ind, ind, has_open_position=True)
     assert decision.action == TradeAction.HOLD
+
+
+def test_can_switch_strategy():
+    service = StrategyService(strategy_name="rsi_oversold")
+    ind = IndicatorResult(sma_short=90, sma_long=100, rsi=25, macd=1, macd_signal=1)
+
+    decision = service.should_buy(ind, ind, has_open_position=False)
+
+    assert decision.action == TradeAction.BUY

@@ -9,13 +9,17 @@ import threading
 import time
 from pathlib import Path
 from tkinter import BOTH, DISABLED, END, LEFT, NORMAL, RIGHT, TOP, Button, Frame, Label, StringVar, Tk
+from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
 BASE_DIR = Path(__file__).resolve().parent
 os.chdir(BASE_DIR)
 
+from app.backtest.backtest_service import BacktestService  # noqa: E402
+from app.backtest.historical_data_service import HistoricalDataService  # noqa: E402
 from app.database.db import fetch_one  # noqa: E402
 from app.exchange.exchange_client import CoincheckClient  # noqa: E402
+from app.strategy.strategies import list_strategies  # noqa: E402
 from config import settings  # noqa: E402
 from main import run_once  # noqa: E402
 
@@ -42,6 +46,7 @@ class CryptoBotGui:
 
         self.status_var = StringVar()
         self.config_var = StringVar()
+        self.strategy_var = StringVar(value=settings.strategy_name)
 
         self._build()
         self._refresh_config()
@@ -72,9 +77,20 @@ class CryptoBotGui:
         self._add_button(toolbar, "Coincheck残高取得", lambda: self._run_action("Coincheck残高取得", self._get_balance))
         self._add_button(toolbar, "APIテスト実行", lambda: self._run_action("APIテスト実行", self._run_pytest))
         self._add_button(toolbar, "1回だけ実行", lambda: self._run_action("1回だけ実行", run_once))
+        self._add_button(toolbar, "バックテスト実行", lambda: self._run_action("バックテスト実行", self._run_backtest))
 
         loopbar = Frame(body)
         loopbar.pack(side=TOP, fill="x", pady=(0, 10))
+
+        Label(loopbar, text="戦略").pack(side=LEFT, padx=(0, 6))
+        self.strategy_combo = ttk.Combobox(
+            loopbar,
+            textvariable=self.strategy_var,
+            values=[strategy.name for strategy in list_strategies()],
+            width=24,
+            state="readonly",
+        )
+        self.strategy_combo.pack(side=LEFT, padx=(0, 14))
 
         self.start_button = Button(loopbar, text="定期実行開始", command=self._start_loop, width=18)
         self.start_button.pack(side=LEFT, padx=(0, 8))
@@ -104,7 +120,10 @@ class CryptoBotGui:
                     f".env: {'あり' if env_path.exists() else 'なし'}",
                     f"取引所: {settings.exchange_name}",
                     f"銘柄: {settings.symbol}",
+                    f"戦略: {self.strategy_var.get()}",
                     f"注文金額: {settings.order_amount_jpy} JPY",
+                    f"バックテスト: 初期資金 {settings.backtest_initial_jpy} JPY / 注文金額 {settings.backtest_order_amount_jpy} JPY",
+                    f"バックテスト取得: {settings.backtest_trade_limit}件 x {settings.backtest_trade_pages}ページ",
                     f"Coincheck Access Key: {_mask(settings.coincheck_access_key)}",
                     f"Coincheck Secret Key: {_mask(settings.coincheck_secret_key)}",
                 ]
@@ -157,6 +176,48 @@ class CryptoBotGui:
         )
         output = "\n".join(part for part in [completed.stdout, completed.stderr] if part.strip())
         return f"終了コード: {completed.returncode}\n{output}"
+
+    def _run_backtest(self) -> str:
+        client = CoincheckClient()
+        history = HistoricalDataService(client)
+        trades = history.fetch_recent_trades(
+            pair=settings.symbol.lower(),
+            pages=settings.backtest_trade_pages,
+            limit=settings.backtest_trade_limit,
+        )
+        if not trades:
+            return "バックテスト対象の取引履歴が取得できませんでした。"
+
+        result = BacktestService().run(
+            trades=trades,
+            symbol=settings.symbol,
+            strategy_name=self.strategy_var.get(),
+            initial_jpy=settings.backtest_initial_jpy,
+            order_amount_jpy=settings.backtest_order_amount_jpy,
+        )
+        lines = [
+            f"戦略: {result.strategy_name}",
+            f"対象取引履歴: {len(trades)}件",
+            f"初期資金: {result.initial_jpy:.0f} JPY",
+            f"最終資金: {result.final_jpy:.0f} JPY",
+            f"総損益: {result.total_profit_jpy:.0f} JPY",
+            f"総リターン: {result.total_return_rate * 100:.2f}%",
+            f"取引回数: {result.trade_count}",
+            f"勝率: {result.win_rate * 100:.2f}%",
+            f"勝ち: {result.win_count} / 負け: {result.loss_count}",
+            f"最大ドローダウン: {result.max_drawdown_jpy:.0f} JPY ({result.max_drawdown_rate * 100:.2f}%)",
+            f"最大連敗: {result.max_consecutive_losses}",
+        ]
+        if result.trades:
+            lines.append("")
+            lines.append("直近の売買履歴:")
+            for trade in result.trades[-10:]:
+                lines.append(
+                    f"- {trade.entry_time:%Y-%m-%d %H:%M} -> {trade.exit_time:%Y-%m-%d %H:%M} "
+                    f"{trade.entry_price:.0f} -> {trade.exit_price:.0f} "
+                    f"損益 {trade.gross_profit_jpy:.0f} JPY / {trade.exit_reason}"
+                )
+        return "\n".join(lines)
 
     def _start_loop(self) -> None:
         if self.loop_thread and self.loop_thread.is_alive():
