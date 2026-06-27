@@ -61,7 +61,8 @@ GUIでは、DB接続確認、Coincheck価格取得、Coincheck残高取得、API
 python backtest.py
 ```
 
-バックテスト件数は `.env` の `BACKTEST_TRADE_LIMIT` と `BACKTEST_TRADE_PAGES` で調整する。
+バックテスト件数は `.env` の `BACKTEST_TRADE_LIMIT` で調整する。
+Coincheckの現在の取引履歴APIではページング指定が使えないため、直近取得分で検証する。
 
 ## Coincheck実注文の有効化
 

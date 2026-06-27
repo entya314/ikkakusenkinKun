@@ -24,23 +24,14 @@ class HistoricalDataService:
         pages: int = 5,
         limit: int = 100,
     ) -> list[HistoricalTrade]:
-        all_trades: list[HistoricalTrade] = []
-        ending_before: int | None = None
+        # Coincheck currently rejects starting_after / ending_before for trades.
+        # Keep the pages argument for config compatibility, but fetch one recent window.
+        payload = self.client.get_trades(pair=pair, limit=limit)
+        raw_trades = payload.get("data") if isinstance(payload, dict) else None
+        if not raw_trades:
+            return []
 
-        for _ in range(pages):
-            payload = self.client.get_trades(pair=pair, limit=limit, ending_before=ending_before)
-            raw_trades = payload.get("data") if isinstance(payload, dict) else None
-            if not raw_trades:
-                break
-
-            parsed = [self._parse_trade(item) for item in raw_trades]
-            all_trades.extend(parsed)
-            oldest_id = min(item.id for item in parsed)
-            if ending_before == oldest_id:
-                break
-            ending_before = oldest_id
-
-        unique = {trade.id: trade for trade in all_trades}
+        unique = {trade.id: trade for trade in [self._parse_trade(item) for item in raw_trades]}
         return sorted(unique.values(), key=lambda item: item.created_at)
 
     def _parse_trade(self, item: dict[str, Any]) -> HistoricalTrade:

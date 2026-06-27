@@ -54,7 +54,7 @@ def test_get_trades_uses_public_endpoint(monkeypatch):
     get = Mock(return_value=response)
     monkeypatch.setattr("app.exchange.exchange_client.requests.get", get)
 
-    result = client.get_trades("btc_jpy", limit=50, ending_before=123)
+    result = client.get_trades("btc_jpy", limit=50)
 
     assert result == {"success": True, "data": []}
     get.assert_called_once()
@@ -63,7 +63,6 @@ def test_get_trades_uses_public_endpoint(monkeypatch):
         "pair": "btc_jpy",
         "limit": 50,
         "order": "desc",
-        "ending_before": 123,
     }
 
 

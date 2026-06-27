@@ -123,7 +123,7 @@ class CryptoBotGui:
                     f"戦略: {self.strategy_var.get()}",
                     f"注文金額: {settings.order_amount_jpy} JPY",
                     f"バックテスト: 初期資金 {settings.backtest_initial_jpy} JPY / 注文金額 {settings.backtest_order_amount_jpy} JPY",
-                    f"バックテスト取得: {settings.backtest_trade_limit}件 x {settings.backtest_trade_pages}ページ",
+                    f"バックテスト取得: 直近 {settings.backtest_trade_limit}件",
                     f"Coincheck Access Key: {_mask(settings.coincheck_access_key)}",
                     f"Coincheck Secret Key: {_mask(settings.coincheck_secret_key)}",
                 ]

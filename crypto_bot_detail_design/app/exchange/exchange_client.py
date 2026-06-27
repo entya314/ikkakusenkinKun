@@ -64,14 +64,8 @@ class CoincheckClient:
         pair: str = "btc_jpy",
         limit: int = 100,
         order: str = "desc",
-        starting_after: int | None = None,
-        ending_before: int | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {"pair": pair, "limit": limit, "order": order}
-        if starting_after is not None:
-            params["starting_after"] = starting_after
-        if ending_before is not None:
-            params["ending_before"] = ending_before
 
         url = f"{self.base_url}/api/trades"
         response = requests.get(url, params=params, timeout=10)
