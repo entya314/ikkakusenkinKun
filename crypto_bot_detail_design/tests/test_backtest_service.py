@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from app.backtest.backtest_service import BacktestService
 from app.backtest.candle_builder import build_candles_from_trades
+from app.backtest.historical_data_service import HistoricalDataService
 from app.backtest.models import HistoricalTrade
 
 
@@ -46,3 +47,31 @@ def test_backtest_runs_without_real_orders():
     assert result.initial_jpy == Decimal("100000")
     assert result.trade_count >= 1
     assert result.final_jpy > Decimal("100000")
+
+
+def test_historical_data_service_fetches_recent_trades_without_paging_params():
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def get_trades(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "success": True,
+                "data": [
+                    {
+                        "id": 10,
+                        "rate": "1000000",
+                        "amount": "0.01",
+                        "order_type": "buy",
+                        "created_at": "2026-01-01T00:00:00Z",
+                    }
+                ],
+            }
+
+    client = FakeClient()
+    trades = HistoricalDataService(client).fetch_recent_trades("btc_jpy", pages=10, limit=50)
+
+    assert len(trades) == 1
+    assert trades[0].id == 10
+    assert client.calls == [{"pair": "btc_jpy", "limit": 50}]

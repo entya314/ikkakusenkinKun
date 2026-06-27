@@ -17,6 +17,7 @@ os.chdir(BASE_DIR)
 
 from app.backtest.backtest_service import BacktestService  # noqa: E402
 from app.backtest.historical_data_service import HistoricalDataService  # noqa: E402
+from app.backtest.historical_trade_store import HistoricalTradeStore  # noqa: E402
 from app.database.db import fetch_one  # noqa: E402
 from app.exchange.exchange_client import CoincheckClient  # noqa: E402
 from app.strategy.strategies import list_strategies  # noqa: E402
@@ -69,15 +70,21 @@ class CryptoBotGui:
         body.pack(side=TOP, fill=BOTH, expand=True)
 
         toolbar = Frame(body)
-        toolbar.pack(side=TOP, fill="x", pady=(0, 10))
+        toolbar.pack(side=TOP, fill="x", pady=(0, 4))
 
         self._add_button(toolbar, "設定確認", self._refresh_config)
         self._add_button(toolbar, "DB接続確認", lambda: self._run_action("DB接続確認", self._check_db))
         self._add_button(toolbar, "Coincheck価格取得", lambda: self._run_action("Coincheck価格取得", self._get_ticker))
         self._add_button(toolbar, "Coincheck残高取得", lambda: self._run_action("Coincheck残高取得", self._get_balance))
         self._add_button(toolbar, "APIテスト実行", lambda: self._run_action("APIテスト実行", self._run_pytest))
-        self._add_button(toolbar, "1回だけ実行", lambda: self._run_action("1回だけ実行", run_once))
-        self._add_button(toolbar, "バックテスト実行", lambda: self._run_action("バックテスト実行", self._run_backtest))
+
+        backtest_toolbar = Frame(body)
+        backtest_toolbar.pack(side=TOP, fill="x", pady=(0, 10))
+
+        self._add_button(backtest_toolbar, "1回だけ実行", lambda: self._run_action("1回だけ実行", run_once))
+        self._add_button(backtest_toolbar, "履歴取得/保存", lambda: self._run_action("履歴取得/保存", self._fetch_and_save_history))
+        self._add_button(backtest_toolbar, "DB履歴件数", lambda: self._run_action("DB履歴件数", self._check_history_count))
+        self._add_button(backtest_toolbar, "DBバックテスト", lambda: self._run_action("DBバックテスト", self._run_db_backtest))
 
         loopbar = Frame(body)
         loopbar.pack(side=TOP, fill="x", pady=(0, 10))
@@ -177,7 +184,7 @@ class CryptoBotGui:
         output = "\n".join(part for part in [completed.stdout, completed.stderr] if part.strip())
         return f"終了コード: {completed.returncode}\n{output}"
 
-    def _run_backtest(self) -> str:
+    def _fetch_and_save_history(self) -> str:
         client = CoincheckClient()
         history = HistoricalDataService(client)
         trades = history.fetch_recent_trades(
@@ -186,7 +193,39 @@ class CryptoBotGui:
             limit=settings.backtest_trade_limit,
         )
         if not trades:
-            return "バックテスト対象の取引履歴が取得できませんでした。"
+            return "保存対象の取引履歴が取得できませんでした。"
+
+        store = HistoricalTradeStore()
+        inserted = store.save_trades(settings.symbol, trades)
+        total = store.count(settings.symbol)
+        started_at, ended_at = store.date_range(settings.symbol)
+        lines = [
+            f"API取得件数: {len(trades)}件",
+            f"新規保存件数: {inserted}件",
+            f"DB累計件数: {total}件",
+        ]
+        if started_at and ended_at:
+            lines.append(f"DB期間: {started_at:%Y-%m-%d %H:%M:%S} -> {ended_at:%Y-%m-%d %H:%M:%S}")
+        return "\n".join(lines)
+
+    def _check_history_count(self) -> str:
+        store = HistoricalTradeStore()
+        total = store.count(settings.symbol)
+        started_at, ended_at = store.date_range(settings.symbol)
+        if not total:
+            return "DBにバックテスト用履歴データがありません。先に「履歴取得/保存」を実行してください。"
+        return "\n".join(
+            [
+                f"DB履歴件数: {total}件",
+                f"DB期間: {started_at:%Y-%m-%d %H:%M:%S} -> {ended_at:%Y-%m-%d %H:%M:%S}",
+            ]
+        )
+
+    def _run_db_backtest(self) -> str:
+        store = HistoricalTradeStore()
+        trades = store.load_trades(settings.symbol)
+        if not trades:
+            return "DBにバックテスト用履歴データがありません。先に「履歴取得/保存」を実行してください。"
 
         result = BacktestService().run(
             trades=trades,

@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 from app.backtest.backtest_service import BacktestService
-from app.backtest.historical_data_service import HistoricalDataService
-from app.exchange.exchange_client import CoincheckClient
+from app.backtest.historical_trade_store import HistoricalTradeStore
 from config import settings
 
 
 def main() -> None:
-    client = CoincheckClient()
-    history = HistoricalDataService(client)
-    trades = history.fetch_recent_trades(
-        pair=settings.symbol.lower(),
-        pages=settings.backtest_trade_pages,
-        limit=settings.backtest_trade_limit,
-    )
+    store = HistoricalTradeStore()
+    trades = store.load_trades(settings.symbol)
+    if not trades:
+        print("No historical trades in DB. Run fetch_historical_trades.py first.")
+        return
+
     result = BacktestService().run(
         trades=trades,
         symbol=settings.symbol,

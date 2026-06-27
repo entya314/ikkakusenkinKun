@@ -18,6 +18,13 @@ copy .env.example .env
 
 `.env` にSQL Server、Coincheck、LINEの設定を入れる。
 
+`.env.example` が更新された場合は、以下のBATで `.env` を作り直せる。
+既存の `COINCHECK_ACCESS_KEY` と `COINCHECK_SECRET_KEY` は自動で引き継ぐ。
+
+```text
+refresh_env_from_example.bat
+```
+
 ## DB作成
 
 SQL Server上で対象DBを作成後、以下の順で実行する。
@@ -41,11 +48,18 @@ python main.py
 python gui.py
 ```
 
-GUIでは、DB接続確認、Coincheck価格取得、Coincheck残高取得、APIテスト実行、バックテスト実行、1回だけ実行、定期実行の開始・停止ができる。
+GUIでは、DB接続確認、Coincheck価格取得、Coincheck残高取得、APIテスト実行、履歴取得/保存、DBバックテスト、1回だけ実行、定期実行の開始・停止ができる。
 実注文を許可する `TRADING_ENABLED=true` の場合は画面上に警告表示される。
 
-バックテストではCoincheckの公開取引履歴を取得し、選択した戦略で仮想売買を行う。
+バックテストでは、先にCoincheckの公開取引履歴をDBへ保存し、DB上の履歴データで仮想売買を行う。
 バックテスト処理は注文APIを呼ばない。
+
+GUIでの基本手順:
+
+1. `履歴取得/保存` でCoincheck公開取引履歴をDBへ保存する。
+2. `DB履歴件数` で保存件数と期間を確認する。
+3. 戦略を選択する。
+4. `DBバックテスト` でDB上の履歴データを使って検証する。
 
 選択できる戦略:
 
@@ -58,11 +72,19 @@ GUIでは、DB接続確認、Coincheck価格取得、Coincheck残高取得、API
 コマンドでバックテストする場合:
 
 ```bash
+python fetch_historical_trades.py
 python backtest.py
 ```
 
-バックテスト件数は `.env` の `BACKTEST_TRADE_LIMIT` で調整する。
+APIからDBへ保存する取得件数は `.env` の `BACKTEST_TRADE_LIMIT` で調整する。
 Coincheckの現在の取引履歴APIではページング指定が使えないため、直近取得分で検証する。
+
+初回のみ、SQL Serverにバックテスト用テーブルを追加するSQLも用意している。
+GUIまたは `fetch_historical_trades.py` 実行時にも自動作成される。
+
+```text
+sql/003_create_historical_trades.sql
+```
 
 ## Coincheck実注文の有効化
 
