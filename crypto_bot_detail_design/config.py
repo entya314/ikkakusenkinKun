@@ -63,6 +63,9 @@ class Settings:
 
     trading_enabled: bool = _get_bool("TRADING_ENABLED", False)
     order_amount_jpy: int = _get_int("ORDER_AMOUNT_JPY", 5000)
+    live_test_order_amount_jpy: int = _get_int("LIVE_TEST_ORDER_AMOUNT_JPY", 500)
+    min_order_amount_jpy: int = _get_int("MIN_ORDER_AMOUNT_JPY", 500)
+    order_cooldown_seconds: int = _get_int("ORDER_COOLDOWN_SECONDS", 300)
     take_profit_rate: float = _get_float("TAKE_PROFIT_RATE", 0.005)
     stop_loss_rate: float = _get_float("STOP_LOSS_RATE", 0.007)
     main_loop_interval_seconds: int = _get_int("MAIN_LOOP_INTERVAL_SECONDS", 60)
@@ -74,6 +77,7 @@ class Settings:
 
     # Risk settings
     max_daily_loss_rate: float = _get_float("MAX_DAILY_LOSS_RATE", 0.03)
+    max_daily_loss_jpy: int = _get_int("MAX_DAILY_LOSS_JPY", 3000)
     max_consecutive_losses: int = _get_int("MAX_CONSECUTIVE_LOSSES", 3)
     api_retry_count: int = _get_int("API_RETRY_COUNT", 3)
     api_retry_interval_seconds: int = _get_int("API_RETRY_INTERVAL_SECONDS", 5)

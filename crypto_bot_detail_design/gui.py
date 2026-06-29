@@ -9,7 +9,7 @@ import threading
 import time
 from pathlib import Path
 from tkinter import BOTH, DISABLED, END, LEFT, NORMAL, RIGHT, TOP, Button, Frame, Label, StringVar, Tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
@@ -20,6 +20,7 @@ from app.backtest.backtest_service import BacktestService  # noqa: E402
 from app.backtest.historical_candle_store import HistoricalCandleStore  # noqa: E402
 from app.database.db import fetch_one  # noqa: E402
 from app.exchange.exchange_client import CoincheckClient  # noqa: E402
+from app.order.order_service import OrderService  # noqa: E402
 from app.strategy.strategies import list_strategies  # noqa: E402
 from config import settings  # noqa: E402
 from main import run_once  # noqa: E402
@@ -37,8 +38,8 @@ class CryptoBotGui:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("一攫千金くん 操作パネル")
-        self.root.geometry("900x620")
-        self.root.minsize(760, 520)
+        self.root.geometry("940x660")
+        self.root.minsize(820, 560)
 
         self.messages: queue.Queue[str] = queue.Queue()
         self.action_buttons: list[Button] = []
@@ -75,9 +76,10 @@ class CryptoBotGui:
 
         self._add_button(toolbar, "設定確認", self._refresh_config)
         self._add_button(toolbar, "DB接続確認", lambda: self._run_action("DB接続確認", self._check_db))
-        self._add_button(toolbar, "Coincheck価格取得", lambda: self._run_action("Coincheck価格取得", self._get_ticker))
-        self._add_button(toolbar, "Coincheck残高取得", lambda: self._run_action("Coincheck残高取得", self._get_balance))
-        self._add_button(toolbar, "APIテスト実行", lambda: self._run_action("APIテスト実行", self._run_pytest))
+        self._add_button(toolbar, "Coincheck価格", lambda: self._run_action("Coincheck価格", self._get_ticker))
+        self._add_button(toolbar, "Coincheck残高", lambda: self._run_action("Coincheck残高", self._get_balance))
+        self._add_button(toolbar, "少額実注文テスト", self._confirm_live_test_order)
+        self._add_button(toolbar, "テスト実行", lambda: self._run_action("テスト実行", self._run_pytest))
 
         backtest_toolbar = Frame(body)
         backtest_toolbar.pack(side=TOP, fill="x", pady=(0, 10))
@@ -140,8 +142,9 @@ class CryptoBotGui:
                     f"銘柄: {settings.symbol}",
                     f"戦略: {self.strategy_var.get()}",
                     f"ローソク足: {self.timeframe_var.get()}",
-                    f"注文金額: {settings.order_amount_jpy} JPY",
-                    f"バックテスト: 初期資金 {settings.backtest_initial_jpy} JPY / 注文金額 {settings.backtest_order_amount_jpy} JPY",
+                    f"注文額: {settings.order_amount_jpy} JPY",
+                    f"少額実注文テスト: {settings.live_test_order_amount_jpy} JPY",
+                    f"バックテスト: 初期資金 {settings.backtest_initial_jpy} JPY / 注文額 {settings.backtest_order_amount_jpy} JPY",
                     f"Coincheck Access Key: {_mask(settings.coincheck_access_key)}",
                     f"Coincheck Secret Key: {_mask(settings.coincheck_secret_key)}",
                 ]
@@ -174,19 +177,17 @@ class CryptoBotGui:
         row = fetch_one("SELECT @@SERVERNAME, DB_NAME(), GETDATE()")
         if row is None:
             return "DBから結果が返りませんでした。"
-        return f"DB接続成功\nサーバー名: {row[0]}\nDB名: {row[1]}\n現在時刻: {row[2]}"
+        return f"DB接続成功\nサーバー: {row[0]}\nDB: {row[1]}\n現在時刻: {row[2]}"
 
     def _get_ticker(self) -> dict:
-        client = CoincheckClient()
-        return client.get_ticker(pair=settings.symbol.lower())
+        return CoincheckClient().get_ticker(pair=settings.symbol.lower())
 
     def _get_balance(self) -> dict:
-        client = CoincheckClient()
-        return client.get_balance()
+        return CoincheckClient().get_balance()
 
     def _run_pytest(self) -> str:
         completed = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests/test_exchange_client.py"],
+            [sys.executable, "-m", "pytest"],
             cwd=BASE_DIR,
             text=True,
             capture_output=True,
@@ -195,24 +196,40 @@ class CryptoBotGui:
         output = "\n".join(part for part in [completed.stdout, completed.stderr] if part.strip())
         return f"終了コード: {completed.returncode}\n{output}"
 
+    def _confirm_live_test_order(self) -> None:
+        amount = settings.live_test_order_amount_jpy
+        ok = messagebox.askyesno(
+            "少額実注文テスト",
+            (
+                f"Coincheckへ {amount} JPY の成行買い注文を送信します。\n\n"
+                "実行条件:\n"
+                "- .env の TRADING_ENABLED=true\n"
+                "- DBの bot_status.is_trading_enabled=1\n"
+                "- 緊急停止がOFF\n\n"
+                "続行しますか？"
+            ),
+        )
+        if ok:
+            self._run_action("少額実注文テスト", self._run_live_test_order)
+
+    def _run_live_test_order(self) -> str:
+        result = OrderService(CoincheckClient()).market_buy(settings.live_test_order_amount_jpy)
+        return f"注文記録ID: {result.order_id}\n状態: {result.status}\nレスポンス: {json.dumps(result.raw_response, ensure_ascii=False)}"
+
     def _select_and_import_candles(self) -> None:
         path = filedialog.askopenfilename(
             title="ローソク足CSVを選択",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
         )
-        if not path:
-            return
-        self._run_action("CSVローソク足取込", lambda: self._import_candles(path))
+        if path:
+            self._run_action("CSVローソク足取込", lambda: self._import_candles(path))
 
     def _import_candles(self, path: str) -> str:
         store = HistoricalCandleStore()
         inserted = store.import_csv(path, settings.symbol, self.timeframe_var.get())
         total = store.count(settings.symbol, self.timeframe_var.get())
         started_at, ended_at = store.date_range(settings.symbol, self.timeframe_var.get())
-        lines = [
-            f"新規保存件数: {inserted}件",
-            f"DB累計ローソク足: {total}件",
-        ]
+        lines = [f"新規保存件数: {inserted}", f"DB累計件数: {total}"]
         if started_at and ended_at:
             lines.append(f"DB期間: {started_at:%Y-%m-%d %H:%M:%S} -> {ended_at:%Y-%m-%d %H:%M:%S}")
         return "\n".join(lines)
@@ -222,10 +239,10 @@ class CryptoBotGui:
         total = store.count(settings.symbol, self.timeframe_var.get())
         started_at, ended_at = store.date_range(settings.symbol, self.timeframe_var.get())
         if not total:
-            return "DBにバックテスト用ローソク足データがありません。先に「CSVローソク足取込」を実行してください。"
+            return "DBにバックテスト用ローソク足データがありません。先にCSVローソク足取込を実行してください。"
         return "\n".join(
             [
-                f"DBローソク足件数: {total}件",
+                f"DBローソク足件数: {total}",
                 f"DB期間: {started_at:%Y-%m-%d %H:%M:%S} -> {ended_at:%Y-%m-%d %H:%M:%S}",
             ]
         )
@@ -234,7 +251,7 @@ class CryptoBotGui:
         store = HistoricalCandleStore()
         candles = store.load_candles(settings.symbol, self.timeframe_var.get())
         if not candles:
-            return "DBにバックテスト用ローソク足データがありません。先に「CSVローソク足取込」を実行してください。"
+            return "DBにバックテスト用ローソク足データがありません。先にCSVローソク足取込を実行してください。"
 
         result = BacktestService().run(
             candles_5m=candles,
@@ -246,7 +263,7 @@ class CryptoBotGui:
         )
         lines = [
             f"戦略: {result.strategy_name}",
-            f"対象ローソク足: {len(candles)}件",
+            f"対象ローソク足: {len(candles)}",
             f"時間足: {self.timeframe_var.get()}",
             f"初期資金: {result.initial_jpy:.0f} JPY",
             f"最終資金: {result.final_jpy:.0f} JPY",
@@ -254,7 +271,7 @@ class CryptoBotGui:
             f"総リターン: {result.total_return_rate * 100:.2f}%",
             f"取引回数: {result.trade_count}",
             f"勝率: {result.win_rate * 100:.2f}%",
-            f"勝ち: {result.win_count} / 負け: {result.loss_count}",
+            f"勝ち/負け: {result.win_count} / {result.loss_count}",
             f"最大ドローダウン: {result.max_drawdown_jpy:.0f} JPY ({result.max_drawdown_rate * 100:.2f}%)",
             f"最大連敗: {result.max_consecutive_losses}",
         ]

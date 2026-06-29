@@ -3,14 +3,17 @@ from __future__ import annotations
 import time
 from decimal import Decimal
 
-from app.asset.asset_service import AssetService
 from app.common.logger import setup_logger
 from app.exchange.exchange_client import CoincheckClient
+from app.market.candle_service import CandleService
 from app.market.market_data_service import MarketDataService
 from app.notification.line_notifier import LineNotifier
 from app.order.order_service import OrderService
 from app.position.position_service import PositionService
 from app.risk.risk_service import RiskService
+from app.strategy.signal_service import SignalService
+from app.strategy.strategy_service import StrategyService
+from app.strategy.strategies import TradeAction
 from config import settings
 
 
@@ -20,44 +23,98 @@ logger = setup_logger()
 def run_once() -> None:
     client = CoincheckClient()
     market_data_service = MarketDataService(client)
-    asset_service = AssetService(client)
+    candle_service = CandleService()
+    signal_service = SignalService()
+    strategy_service = StrategyService()
     order_service = OrderService(client)
     position_service = PositionService()
     risk_service = RiskService()
 
-    risk_result = risk_service.check_emergency_stop()
-    if not risk_result.can_trade:
-        logger.info("取引停止: %s", risk_result.reason)
+    current_price: Decimal = market_data_service.collect_current_price()
+    logger.info("Current price collected: %s %s", settings.symbol, current_price)
+
+    candle_service.build_from_market_prices(settings.symbol, "5m")
+    candle_service.build_from_market_prices(settings.symbol, "15m")
+    candles_5m = candle_service.get_recent_candles(settings.symbol, "5m", limit=120)
+    candles_15m = candle_service.get_recent_candles(settings.symbol, "15m", limit=120)
+    if len(candles_5m) < 20 or len(candles_15m) < 20:
+        logger.info("Trading skipped: not enough candles. 5m=%s 15m=%s", len(candles_5m), len(candles_15m))
         return
 
-    current_price: Decimal = market_data_service.collect_current_price()
-    logger.info("現在価格取得: %s %s", settings.symbol, current_price)
+    risk_result = risk_service.check_emergency_stop()
+    if not risk_result.can_trade:
+        logger.info("Trading skipped after data collection: %s", risk_result.reason)
+        return
 
-    has_position = position_service.has_open_position()
-    logger.info("保有ポジション: %s", has_position)
+    open_position = position_service.get_open_position()
+    if open_position is not None:
+        _handle_open_position(open_position, current_price, strategy_service, order_service, position_service)
+        return
 
-    # TODO:
-    # 1. CandleServiceでローソク足取得
-    # 2. SignalServiceで指標計算
-    # 3. StrategyServiceで売買判断
-    # 4. OrderServiceで注文実行
-    # 現時点では誤発注防止のため、実注文判断は未実装。
+    indicators_5m = signal_service.calculate_indicators([float(candle.close_price) for candle in candles_5m])
+    indicators_15m = signal_service.calculate_indicators([float(candle.close_price) for candle in candles_15m])
+    decision = strategy_service.should_buy(indicators_5m, indicators_15m, has_open_position=False)
+    logger.info("Buy decision: %s / %s", decision.action.value, decision.reason)
+    if decision.action != TradeAction.BUY:
+        return
+
+    order_result = order_service.market_buy(settings.order_amount_jpy)
+    entry_amount = Decimal(settings.order_amount_jpy) / current_price
+    position_service.open_position(
+        entry_order_id=order_result.order_id,
+        entry_price=current_price,
+        amount=entry_amount,
+        take_profit_price=current_price * (Decimal("1") + Decimal(str(settings.take_profit_rate))),
+        stop_loss_price=current_price * (Decimal("1") - Decimal(str(settings.stop_loss_rate))),
+    )
+    logger.info(
+        "Buy order recorded: order_id=%s status=%s estimated_amount=%s",
+        order_result.order_id,
+        order_result.status,
+        entry_amount,
+    )
+
+
+def _handle_open_position(
+    open_position,
+    current_price: Decimal,
+    strategy_service: StrategyService,
+    order_service: OrderService,
+    position_service: PositionService,
+) -> None:
+    position_id = int(open_position[0])
+    entry_price = Decimal(str(open_position[2]))
+    amount = Decimal(str(open_position[3]))
+    decision = strategy_service.judge_exit(
+        entry_price=float(entry_price),
+        current_price=float(current_price),
+        take_profit_rate=settings.take_profit_rate,
+        stop_loss_rate=settings.stop_loss_rate,
+    )
+    logger.info("Exit decision: %s / %s", decision.action.value, decision.reason)
+    if decision.action not in {TradeAction.SELL_TAKE_PROFIT, TradeAction.SELL_STOP_LOSS}:
+        return
+
+    purpose = "TAKE_PROFIT" if decision.action == TradeAction.SELL_TAKE_PROFIT else "STOP_LOSS"
+    order_result = order_service.market_sell(amount, purpose=purpose)
+    position_service.close_position(position_id, order_result.order_id, exit_price=current_price, exit_reason=purpose)
+    logger.info("Sell order recorded: order_id=%s status=%s", order_result.order_id, order_result.status)
 
 
 def main() -> None:
-    logger.info("一攫千金くん 起動")
+    logger.info("IkkakusenkinKun started.")
 
     notifier = LineNotifier()
-    notifier.send_text("【一攫千金くん】システムを起動しました", "SYSTEM_START")
+    notifier.send_text("IkkakusenkinKun started.", "SYSTEM_START")
 
     while True:
         try:
             run_once()
         except KeyboardInterrupt:
-            logger.info("手動終了")
+            logger.info("Stopped by keyboard interrupt.")
             break
         except Exception as e:
-            logger.exception("メインループでエラー: %s", e)
+            logger.exception("Main loop error: %s", e)
 
         time.sleep(settings.main_loop_interval_seconds)
 
